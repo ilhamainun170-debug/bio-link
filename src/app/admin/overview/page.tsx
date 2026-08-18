@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 import { useToast } from '@/components/ui/ToastContext';
+import { clientStore } from '@/lib/clientStore';
 
 interface OverviewItem {
   id: string;
@@ -72,6 +73,13 @@ export default function OverviewPage() {
         toast.error('Save failed', 'Could not save new sequence.');
         setIsSaving(false);
         return;
+      }
+
+      // Sync master state to clientStore
+      const syncRes = await fetch('/api/sync');
+      if (syncRes.ok) {
+        const sJson = await syncRes.json();
+        if (sJson.data) clientStore.setLocalState(sJson.data);
       }
 
       toast.success('Order saved', 'Public biolink sequence updated successfully!');

@@ -18,6 +18,8 @@ import { Category, LinkItem } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
 import ThumbnailLightbox from '@/components/public/ThumbnailLightbox';
 
+import { clientStore } from '@/lib/clientStore';
+
 export default function LinkManagementPage() {
   const toast = useToast();
   const [links, setLinks] = useState<LinkItem[]>([]);
@@ -42,9 +44,10 @@ export default function LinkManagementPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [linksRes, catsRes] = await Promise.all([
+      const [linksRes, catsRes, syncRes] = await Promise.all([
         fetch('/api/links'),
         fetch('/api/categories'),
+        fetch('/api/sync'),
       ]);
 
       if (linksRes.ok) {
@@ -54,6 +57,12 @@ export default function LinkManagementPage() {
       if (catsRes.ok) {
         const cData = await catsRes.json();
         setCategories(cData.categories || []);
+      }
+      if (syncRes && syncRes.ok) {
+        const sData = await syncRes.json();
+        if (sData.data) {
+          clientStore.setLocalState(sData.data);
+        }
       }
     } catch (err) {
       console.error('Error fetching links:', err);

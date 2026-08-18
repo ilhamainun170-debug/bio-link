@@ -15,6 +15,8 @@ import {
 import { Category } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
 
+import { clientStore } from '@/lib/clientStore';
+
 export default function CategoryManagementPage() {
   const toast = useToast();
   const [categories, setCategories] = useState<(Category & { link_count: number })[]>([]);
@@ -29,10 +31,20 @@ export default function CategoryManagementPage() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/categories');
-      if (res.ok) {
-        const data = await res.json();
+      const [catsRes, syncRes] = await Promise.all([
+        fetch('/api/categories'),
+        fetch('/api/sync'),
+      ]);
+
+      if (catsRes.ok) {
+        const data = await catsRes.json();
         setCategories(data.categories || []);
+      }
+      if (syncRes && syncRes.ok) {
+        const sData = await syncRes.json();
+        if (sData.data) {
+          clientStore.setLocalState(sData.data);
+        }
       }
     } catch (err) {
       console.error('Error fetching categories:', err);

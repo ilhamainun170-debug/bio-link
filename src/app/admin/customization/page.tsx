@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AdminHeader from '@/components/admin/AdminHeader';
 import PublicBioView, { MixedItem } from '@/components/public/PublicBioView';
 import {
@@ -9,12 +9,19 @@ import {
   Check,
   Smartphone,
   Sparkles,
+  Download,
+  Database,
+  Cloud,
+  RefreshCw,
 } from 'lucide-react';
-import { Profile, SocialLinks } from '@/lib/types';
+import { Profile, SocialLinks, DatabaseSchema } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
+import { clientStore } from '@/lib/clientStore';
 
 export default function CustomizationPage() {
   const toast = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [profile, setProfile] = useState<Profile>({
     id: 'default-profile',
     name: '',
@@ -38,15 +45,26 @@ export default function CustomizationPage() {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [isCloudKV, setIsCloudKV] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [profileRes, linksRes, catsRes] = await Promise.all([
+      const [profileRes, linksRes, catsRes, syncRes] = await Promise.all([
         fetch('/api/profile'),
         fetch('/api/links'),
         fetch('/api/categories'),
+        fetch('/api/sync'),
       ]);
+
+      if (syncRes.ok) {
+        const syncData = await syncRes.json();
+        setIsCloudKV(syncData.isCloudKV || false);
+        if (syncData.data) {
+          clientStore.setLocalState(syncData.data);
+        }
+      }
 
       if (profileRes.ok) {
         const pData = await profileRes.json();
@@ -60,7 +78,6 @@ export default function CustomizationPage() {
         const links = lData.links || [];
         const cats = cData.categories || [];
 
-        // Build mixed preview
         const mixed: MixedItem[] = [];
         links.forEach((l: any) => {
           if (!l.category_id && l.is_active) {
@@ -144,12 +161,84 @@ export default function CustomizationPage() {
         return;
       }
 
+      // Fetch complete DB and persist to clientStore
+      const syncRes = await fetch('/api/sync');
+      if (syncRes.ok) {
+        const sJson = await syncRes.json();
+        if (sJson.data) {
+          clientStore.setLocalState(sJson.data);
+        }
+      }
+
       toast.success('Saved!', 'Your profile and social media links have been updated.');
     } catch (err) {
       console.error('Profile save error:', err);
       toast.error('Error', 'Failed to communicate with server.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Export Backup
+  const handleExportBackup = async () => {
+    try {
+      const res = await fetch('/api/sync');
+      if (res.ok) {
+        const json = await res.json();
+        clientStore.exportBackupJson(json.data);
+        toast.success('Backup exported', 'Saved complete biolink database JSON.');
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      toast.error('Export error', 'Could not export backup.');
+    }
+  };
+
+  // Import Backup
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed: DatabaseSchema = JSON.parse(content);
+
+        if (!parsed.profile || !Array.isArray(parsed.links) || !Array.isArray(parsed.categories)) {
+          toast.error('Invalid backup format', 'The uploaded file is not a valid BioLink database JSON.');
+          return;
+        }
+
+        const success = await clientStore.pushToServer(parsed);
+        if (success) {
+          toast.success('Backup restored!', 'All links, categories, and customizations have been restored.');
+          fetchData();
+        } else {
+          toast.error('Restore failed', 'Server could not process backup JSON.');
+        }
+      } catch (err) {
+        console.error('Parse error:', err);
+        toast.error('Invalid file', 'Could not parse JSON file.');
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Manual Sync Now
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const synced = await clientStore.syncWithServer();
+      if (synced) {
+        toast.success('Synced!', 'Client and server state are in sync.');
+        fetchData();
+      }
+    } catch (err) {
+      console.error('Sync error:', err);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -331,6 +420,77 @@ export default function CustomizationPage() {
                 <span>Save All Customizations</span>
               </button>
             </form>
+
+            {/* Database & Cloud Backup Card */}
+            <div className="bg-white dark:bg-[#20222C] rounded-2xl p-5 sm:p-6 border border-gray-200/90 dark:border-[#2E3240] shadow-soft-sm space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-[#2E3240]">
+                <div className="flex items-center gap-2.5">
+                  <Database className="w-5 h-5 text-indigo-500" />
+                  <div>
+                    <h3 className="font-bold text-base text-gray-900 dark:text-gray-100">
+                      Data Persistence & Cloud Backup
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      Export, restore, or sync your BioLink database
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                      isCloudKV
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900'
+                        : 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-900'
+                    }`}
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>{isCloudKV ? 'Cloud Redis Active' : 'Client Sync Active'}</span>
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                Your data is continuously preserved in your browser's persistent store and synced to the server. You can also export or import your entire link database anytime as a JSON backup.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleExportBackup}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium bg-gray-100 dark:bg-[#181A22] hover:bg-gray-200 dark:hover:bg-[#2A2D3A] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-[#2E3240] transition-colors"
+                >
+                  <Download className="w-4 h-4 text-indigo-500" />
+                  <span>Export Backup (.json)</span>
+                </button>
+
+                <input
+                  type="file"
+                  accept=".json"
+                  ref={fileInputRef}
+                  onChange={handleImportBackup}
+                  className="hidden"
+                  id="import-backup-file"
+                />
+                <label
+                  htmlFor="import-backup-file"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium bg-gray-100 dark:bg-[#181A22] hover:bg-gray-200 dark:hover:bg-[#2A2D3A] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-[#2E3240] cursor-pointer transition-colors"
+                >
+                  <Upload className="w-4 h-4 text-emerald-500" />
+                  <span>Import / Restore Backup</span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleManualSync}
+                  disabled={isSyncing}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>Sync Now</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Right Live Preview Column (5 cols on lg) */}

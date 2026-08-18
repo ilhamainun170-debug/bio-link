@@ -4,12 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import AdminSidebar from '@/components/admin/AdminSidebar';
 import { AdminSidebarProvider, useAdminSidebar } from '@/components/admin/AdminSidebarContext';
+import ClientStateSync from '@/components/admin/ClientStateSync';
 
 function AdminLayoutInner({ children }: { children: React.ReactNode }) {
   const { sidebarOpen, closeSidebar } = useAdminSidebar();
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] dark:bg-[#14161C] text-gray-900 dark:text-[#E8E8ED]">
+      <ClientStateSync />
       <AdminSidebar
         isOpen={sidebarOpen}
         onClose={closeSidebar}

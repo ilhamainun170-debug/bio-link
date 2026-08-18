@@ -1,11 +1,13 @@
 import React from 'react';
-import { db } from '@/lib/db';
+import { db, isKVConfigured, fetchFromKV } from '@/lib/db';
 import PublicBioView from '@/components/public/PublicBioView';
 
-// Revalidate on updates
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
+  if (isKVConfigured()) {
+    await fetchFromKV();
+  }
   const publicData = db.getPublicView();
 
   return (

@@ -8,26 +8,88 @@ const DATA_DIR = process.env.VERCEL
   : path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-// Memory cache for high performance
+// Memory cache
 let memoryDb: DatabaseSchema | null = null;
 
-function ensureDbFile(): DatabaseSchema {
-  if (memoryDb) {
-    return memoryDb;
-  }
+// Helper to check if KV / Redis is available
+export function isKVConfigured(): boolean {
+  return !!(
+    (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) ||
+    (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
+  );
+}
 
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+// Sync to Upstash / Vercel KV if configured
+export async function syncToKV(data: DatabaseSchema): Promise<void> {
+  const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (kvUrl && kvToken) {
+    try {
+      await fetch(`${kvUrl}/set/biolink_data`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${kvToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      console.warn('KV sync warning:', err);
     }
+  }
+}
 
+// Fetch from Upstash / Vercel KV
+export async function fetchFromKV(): Promise<DatabaseSchema | null> {
+  const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (kvUrl && kvToken) {
+    try {
+      const res = await fetch(`${kvUrl}/get/biolink_data`, {
+        headers: {
+          Authorization: `Bearer ${kvToken}`,
+        },
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.result) {
+          const parsed = typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
+          if (parsed && parsed.links) {
+            memoryDb = parsed;
+            try {
+              if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+              fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
+            } catch {}
+            return parsed;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('KV fetch error:', err);
+    }
+  }
+  return null;
+}
+
+function ensureDbFile(): DatabaseSchema {
+  // Always try to read from disk first to guarantee fresh data across processes
+  try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
-      memoryDb = JSON.parse(raw);
-      return memoryDb!;
+      const parsed = JSON.parse(raw);
+      memoryDb = parsed;
+      return parsed;
     }
   } catch (err) {
     console.error('Error reading DB file:', err);
+  }
+
+  // If memory cache exists and has valid data, use it
+  if (memoryDb && memoryDb.links) {
+    return memoryDb;
   }
 
   // Initialize with seed data
@@ -47,6 +109,9 @@ function saveDb(data: DatabaseSchema): void {
   } catch (err) {
     console.error('Error saving DB file:', err);
   }
+
+  // Non-blocking sync to cloud KV if available
+  syncToKV(data).catch(() => {});
 }
 
 export const db = {
@@ -55,6 +120,11 @@ export const db = {
   },
 
   save(data: DatabaseSchema): void {
+    saveDb(data);
+  },
+
+  // Bulk replace (for restore or client state sync)
+  bulkSync(data: DatabaseSchema): void {
     saveDb(data);
   },
 
@@ -95,9 +165,6 @@ export const db = {
     });
 
     // Compute effective active state for links
-    // A link is effectively active IF:
-    // 1. link.is_active is true (manually enabled by owner)
-    // 2. AND if link belongs to a category, that category.is_active must also be true
     const effectiveActiveLinks = links.filter(link => {
       if (!link.is_active) return false;
       if (link.category_id) {
@@ -126,8 +193,6 @@ export const db = {
       list.sort((a, b) => a.sort_order - b.sort_order);
     });
 
-    // Build the mixed linear stream based on overview_order
-    // If overview_order is missing or incomplete, reconstruct sensibly
     type MixedItem =
       | { type: 'link'; data: LinkItem }
       | { type: 'category'; data: Category; links: LinkItem[] };
@@ -233,16 +298,13 @@ export const db = {
       updated_at: new Date().toISOString(),
     };
 
-    // If moved from category to standalone or vice versa, update overview_order
     if (prevCategoryId && !nextCategoryId) {
-      // became standalone -> add to overview
       const existsInOverview = data.overview_order.some(o => o.id === id && o.type === 'link');
       if (!existsInOverview) {
         const maxOrder = data.overview_order.reduce((max, it) => Math.max(max, it.sort_order), -1);
         data.overview_order.push({ type: 'link', id, sort_order: maxOrder + 1 });
       }
     } else if (!prevCategoryId && nextCategoryId) {
-      // moved into category -> remove from top level overview
       data.overview_order = data.overview_order.filter(o => !(o.type === 'link' && o.id === id));
     }
 
@@ -290,7 +352,6 @@ export const db = {
 
     data.categories.push(cat);
 
-    // Add to overview order at the end
     const maxOrder = data.overview_order.reduce((max, it) => Math.max(max, it.sort_order), -1);
     data.overview_order.push({
       type: 'category',
@@ -323,12 +384,9 @@ export const db = {
 
     data.categories.splice(index, 1);
 
-    // As per PRD §7.4: When category is deleted, links inside are NOT deleted.
-    // They automatically become uncategorized (category_id: null).
     data.links.forEach(link => {
       if (link.category_id === id) {
         link.category_id = null;
-        // add uncategorized links to overview
         const existsInOverview = data.overview_order.some(o => o.id === link.id && o.type === 'link');
         if (!existsInOverview) {
           const maxOrder = data.overview_order.reduce((max, it) => Math.max(max, it.sort_order), -1);
@@ -352,7 +410,6 @@ export const db = {
     const categoryMap = new Map(categories.map(c => [c.id, c]));
     const linkMap = new Map(standaloneLinks.map(l => [l.id, l]));
 
-    // Construct merged items list
     const items: Array<{
       id: string;
       type: 'link' | 'category';
@@ -364,7 +421,6 @@ export const db = {
     }> = [];
 
     const processed = new Set<string>();
-
     const ordered = [...(overview_order || [])].sort((a, b) => a.sort_order - b.sort_order);
 
     ordered.forEach(ord => {
@@ -393,7 +449,6 @@ export const db = {
       }
     });
 
-    // Add remaining standalone links
     standaloneLinks.forEach(l => {
       if (!processed.has(`link-${l.id}`)) {
         items.push({
@@ -408,7 +463,6 @@ export const db = {
       }
     });
 
-    // Add remaining categories
     categories.forEach(c => {
       if (!processed.has(`cat-${c.id}`)) {
         const childCount = links.filter(l => l.category_id === c.id).length;
@@ -468,7 +522,6 @@ export const db = {
     const totalCategories = data.categories.length;
     const avgClicksPerLink = totalLinks > 0 ? parseFloat((totalClicks / totalLinks).toFixed(1)) : 0;
 
-    // Today & this week clicks
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).getTime();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).getTime();
@@ -484,22 +537,18 @@ export const db = {
       if (time >= thirtyDaysAgo) clicksThisMonth++;
     });
 
-    // Most recent link added
     const sortedLinksByDate = [...data.links].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     const mostRecentLink = sortedLinksByDate[0] || null;
 
-    // Top Links
     const sortedByClicks = [...data.links].sort((a, b) => b.click_count - a.click_count);
     const topLinks = sortedByClicks.slice(0, 10).map(l => ({
       ...l,
       percentage: totalClicks > 0 ? Math.round((l.click_count / totalClicks) * 100) : 0,
     }));
 
-    // Clicks over time aggregation
     const rangeDays = Math.min(Math.max(daysRange, 7), 90);
     const dateMap = new Map<string, number>();
 
-    // Initialize all dates in range with 0
     for (let i = rangeDays - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
