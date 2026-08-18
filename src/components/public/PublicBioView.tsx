@@ -8,8 +8,6 @@ import LinkCard from './LinkCard';
 import CategoryAccordion from './CategoryAccordion';
 import ThumbnailLightbox from './ThumbnailLightbox';
 import ThemeToggle from './ThemeToggle';
-import Link from 'next/link';
-import { Lock } from 'lucide-react';
 import { useBiolink } from '@/context/BiolinkContext';
 
 export type MixedItem =
@@ -97,15 +95,7 @@ export default function PublicBioView({ initialData, isPreview = false }: Public
     <div className={`w-full max-w-lg mx-auto flex flex-col items-center justify-between ${isPreview ? 'p-3' : 'py-6 px-3 sm:px-4'}`}>
       {/* Top Floating Controls */}
       {!isPreview && (
-        <div className="w-full flex items-center justify-between mb-4 px-1">
-          <Link
-            href="/admin"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 hover:bg-gray-200/60 dark:hover:bg-[#20222C] transition-colors border border-transparent hover:border-gray-200 dark:hover:border-[#2E3240]"
-            title="Admin Login"
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>Admin</span>
-          </Link>
+        <div className="w-full flex items-center justify-end mb-4 px-1">
           <ThemeToggle />
         </div>
       )}
