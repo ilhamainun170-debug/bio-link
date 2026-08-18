@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import AdminHeader from '@/components/admin/AdminHeader';
 import StatCard from '@/components/admin/StatCard';
 import LinkModal from '@/components/admin/LinkModal';
@@ -18,68 +18,22 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
-import { AnalyticsSummary, Category, LinkItem } from '@/lib/types';
+import { LinkItem } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
+import { useBiolink } from '@/context/BiolinkContext';
 
 export default function AdminDashboardPage() {
   const toast = useToast();
-  const [stats, setStats] = useState<AnalyticsSummary | null>(null);
-  const [links, setLinks] = useState<LinkItem[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { stats, links, categories, toggleLinkActive, loading } = useBiolink();
 
   // Modals
   const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
 
-  const fetchData = async () => {
+  const handleToggleActive = async (link: LinkItem) => {
     try {
-      setLoading(true);
-      const [analyticsRes, linksRes, catsRes] = await Promise.all([
-        fetch('/api/analytics'),
-        fetch('/api/links'),
-        fetch('/api/categories'),
-      ]);
-
-      if (analyticsRes.ok) {
-        const aData = await analyticsRes.json();
-        setStats(aData);
-      }
-      if (linksRes.ok) {
-        const lData = await linksRes.json();
-        setLinks(lData.links || []);
-      }
-      if (catsRes.ok) {
-        const cData = await catsRes.json();
-        setCategories(cData.categories || []);
-      }
-    } catch (err) {
-      console.error('Error fetching dashboard data:', err);
-      toast.error('Data error', 'Could not refresh dashboard statistics.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const handleToggleLinkActive = async (link: LinkItem) => {
-    try {
-      const res = await fetch('/api/links', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: link.id, is_active: !link.is_active }),
-      });
-
-      if (res.ok) {
-        setLinks((prev) =>
-          prev.map((l) => (l.id === link.id ? { ...l, is_active: !l.is_active } : l))
-        );
-        toast.info(link.is_active ? 'Link deactivated' : 'Link activated');
-        fetchData();
-      }
+      await toggleLinkActive(link.id);
+      toast.info(link.is_active ? 'Link deactivated' : 'Link activated');
     } catch (err) {
       console.error('Failed to toggle link active state:', err);
     }
@@ -127,28 +81,28 @@ export default function AdminDashboardPage() {
         <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <StatCard
             label="Total Links"
-            value={stats ? stats.totalLinks : links.length}
+            value={stats.totalLinks}
             icon={Link2}
             color="indigo"
             subtext="All configured links"
           />
           <StatCard
             label="Active Links"
-            value={stats ? stats.totalActiveLinks : links.filter((l) => l.is_active).length}
+            value={stats.totalActiveLinks}
             icon={CheckCircle2}
             color="emerald"
             subtext="Visible on biolink"
           />
           <StatCard
             label="Inactive Links"
-            value={stats ? stats.totalInactiveLinks : links.filter((l) => !l.is_active).length}
+            value={stats.totalInactiveLinks}
             icon={XCircle}
             color="rose"
             subtext="Hidden from public"
           />
           <StatCard
             label="Categories"
-            value={stats ? stats.totalCategories : categories.length}
+            value={stats.totalCategories}
             icon={FolderTree}
             color="violet"
             subtext="Folder groups"
@@ -156,28 +110,28 @@ export default function AdminDashboardPage() {
 
           <StatCard
             label="Total Clicks"
-            value={stats ? stats.totalClicks : 0}
+            value={stats.totalClicks}
             icon={MousePointerClick}
             color="sky"
             subtext="Lifetime link hits"
           />
           <StatCard
             label="Clicks Today"
-            value={stats ? stats.clicksToday : 0}
+            value={stats.clicksToday}
             icon={Calendar}
             color="amber"
             subtext="Last 24 hours"
           />
           <StatCard
             label="Clicks This Week"
-            value={stats ? stats.clicksThisWeek : 0}
+            value={stats.clicksThisWeek}
             icon={MousePointerClick}
             color="indigo"
             subtext="Past 7 days"
           />
           <StatCard
             label="Avg Clicks / Link"
-            value={stats ? stats.avgClicksPerLink : 0}
+            value={stats.avgClicksPerLink}
             icon={Sparkles}
             color="emerald"
             subtext="Engagement ratio"
@@ -275,7 +229,7 @@ export default function AdminDashboardPage() {
                         {/* Status Toggle */}
                         <td className="py-3.5 px-4 text-center">
                           <button
-                            onClick={() => handleToggleLinkActive(link)}
+                            onClick={() => handleToggleActive(link)}
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${
                               link.is_active
                                 ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-900/40'
@@ -319,7 +273,6 @@ export default function AdminDashboardPage() {
       <LinkModal
         isOpen={isLinkModalOpen}
         onClose={() => setIsLinkModalOpen(false)}
-        onSaved={fetchData}
         categories={categories}
       />
 
@@ -327,7 +280,6 @@ export default function AdminDashboardPage() {
       <CategoryModal
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
-        onSaved={fetchData}
       />
     </div>
   );

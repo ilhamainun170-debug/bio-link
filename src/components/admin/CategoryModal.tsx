@@ -5,11 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Folder, Check } from 'lucide-react';
 import { Category } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
+import { useBiolink } from '@/context/BiolinkContext';
 
 interface CategoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved?: () => void;
   initialData?: Category | null;
 }
 
@@ -20,6 +21,7 @@ export default function CategoryModal({
   initialData,
 }: CategoryModalProps) {
   const toast = useToast();
+  const { addCategory, updateCategory } = useBiolink();
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -41,32 +43,20 @@ export default function CategoryModal({
 
     setIsSubmitting(true);
 
-    const payload = {
-      ...(initialData && { id: initialData.id }),
-      name: name.trim(),
-    };
-
     try {
-      const res = await fetch('/api/categories', {
-        method: initialData ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error('Save failed', data.error || 'Could not save category.');
-        setIsSubmitting(false);
-        return;
+      if (initialData) {
+        await updateCategory(initialData.id, { name: name.trim() });
+        toast.success('Category updated', `"${name}" has been saved.`);
+      } else {
+        await addCategory(name.trim());
+        toast.success('Category created', `"${name}" has been added.`);
       }
 
-      toast.success(initialData ? 'Category updated' : 'Category created', `"${name}" has been saved.`);
-      onSaved();
+      if (onSaved) onSaved();
       onClose();
     } catch (err) {
       console.error('Error saving category:', err);
-      toast.error('Network error', 'Failed to communicate with server.');
+      toast.error('Error', 'Failed to save category.');
     } finally {
       setIsSubmitting(false);
     }

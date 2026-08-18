@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import AdminHeader from '@/components/admin/AdminHeader';
 import StatCard from '@/components/admin/StatCard';
 import ConfirmModal from '@/components/admin/ConfirmModal';
@@ -21,56 +21,25 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
-import { AnalyticsSummary } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
+import { useBiolink } from '@/context/BiolinkContext';
 
 export default function AnalyticsPage() {
   const toast = useToast();
+  const { stats, resetAnalytics, loading } = useBiolink();
   const [range, setRange] = useState<number>(30);
-  const [data, setData] = useState<AnalyticsSummary | null>(null);
-  const [loading, setLoading] = useState(true);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-
-  const fetchAnalytics = async (selectedRange = range) => {
-    try {
-      setLoading(true);
-      const res = await fetch(`/api/analytics?range=${selectedRange}`);
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
-      }
-    } catch (err) {
-      console.error('Error fetching analytics:', err);
-      toast.error('Fetch error', 'Could not load analytics data.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAnalytics(range);
-  }, [range]);
 
   const handleResetAnalytics = async () => {
     setIsResetting(true);
     try {
-      const res = await fetch('/api/analytics/reset', {
-        method: 'POST',
-      });
-
-      if (!res.ok) {
-        toast.error('Reset failed', 'Could not reset click history.');
-        setIsResetting(false);
-        return;
-      }
-
+      await resetAnalytics();
       toast.success('Analytics reset', 'All click counters and history have been cleared.');
       setIsResetModalOpen(false);
-      fetchAnalytics(range);
     } catch (err) {
       console.error('Reset error:', err);
-      toast.error('Error', 'Failed to communicate with server.');
+      toast.error('Error', 'Failed to reset analytics.');
     } finally {
       setIsResetting(false);
     }
@@ -119,21 +88,21 @@ export default function AnalyticsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           <StatCard
             label="Total Clicks"
-            value={data ? data.totalClicks : 0}
+            value={stats.totalClicks}
             icon={MousePointerClick}
             color="indigo"
             subtext="All recorded link interactions"
           />
           <StatCard
             label="Total Links"
-            value={data ? data.totalLinks : 0}
+            value={stats.totalLinks}
             icon={Link2}
             color="emerald"
             subtext="Available link items"
           />
           <StatCard
             label="Average Clicks per Link"
-            value={data ? data.avgClicksPerLink : 0}
+            value={stats.avgClicksPerLink}
             icon={Sparkles}
             color="sky"
             subtext="Clicks / Total links ratio"
@@ -159,14 +128,14 @@ export default function AnalyticsPage() {
               <div className="h-full flex items-center justify-center text-sm text-gray-400">
                 Loading chart...
               </div>
-            ) : !data || data.clicksOverTime.length === 0 ? (
+            ) : !stats || stats.clicksOverTime.length === 0 ? (
               <div className="h-full flex items-center justify-center text-sm text-gray-400">
                 No click data available yet.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
-                  data={data.clicksOverTime}
+                  data={stats.clicksOverTime}
                   margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                 >
                   <defs>
@@ -232,13 +201,13 @@ export default function AnalyticsPage() {
             Links with highest click-through volume (Top 10)
           </p>
 
-          {!data || data.topLinks.length === 0 ? (
+          {!stats || stats.topLinks.length === 0 ? (
             <div className="text-center py-8 text-sm text-gray-400">
               No link clicks recorded yet.
             </div>
           ) : (
             <div className="space-y-4">
-              {data.topLinks.map((link, index) => (
+              {stats.topLinks.map((link, index) => (
                 <div key={link.id} className="space-y-1.5">
                   <div className="flex items-center justify-between text-xs sm:text-sm">
                     <div className="flex items-center gap-2 min-w-0 pr-2">

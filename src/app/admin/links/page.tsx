@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import AdminHeader from '@/components/admin/AdminHeader';
 import LinkModal from '@/components/admin/LinkModal';
 import ConfirmModal from '@/components/admin/ConfirmModal';
@@ -14,17 +14,14 @@ import {
   ExternalLink,
   Eye,
 } from 'lucide-react';
-import { Category, LinkItem } from '@/lib/types';
+import { LinkItem } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
 import ThumbnailLightbox from '@/components/public/ThumbnailLightbox';
-
-import { clientStore } from '@/lib/clientStore';
+import { useBiolink } from '@/context/BiolinkContext';
 
 export default function LinkManagementPage() {
   const toast = useToast();
-  const [links, setLinks] = useState<LinkItem[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { links, categories, toggleLinkActive, deleteLink, loading } = useBiolink();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
 
@@ -41,55 +38,10 @@ export default function LinkManagementPage() {
     title: '',
   });
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [linksRes, catsRes, syncRes] = await Promise.all([
-        fetch('/api/links'),
-        fetch('/api/categories'),
-        fetch('/api/sync'),
-      ]);
-
-      if (linksRes.ok) {
-        const lData = await linksRes.json();
-        setLinks(lData.links || []);
-      }
-      if (catsRes.ok) {
-        const cData = await catsRes.json();
-        setCategories(cData.categories || []);
-      }
-      if (syncRes && syncRes.ok) {
-        const sData = await syncRes.json();
-        if (sData.data) {
-          clientStore.setLocalState(sData.data);
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching links:', err);
-      toast.error('Load error', 'Could not load links.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
   const handleToggleActive = async (link: LinkItem) => {
     try {
-      const res = await fetch('/api/links', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: link.id, is_active: !link.is_active }),
-      });
-
-      if (res.ok) {
-        setLinks((prev) =>
-          prev.map((l) => (l.id === link.id ? { ...l, is_active: !l.is_active } : l))
-        );
-        toast.info(link.is_active ? `"${link.title}" deactivated` : `"${link.title}" activated`);
-      }
+      await toggleLinkActive(link.id);
+      toast.info(link.is_active ? `"${link.title}" deactivated` : `"${link.title}" activated`);
     } catch (err) {
       console.error('Failed to toggle link active state:', err);
     }
@@ -100,22 +52,12 @@ export default function LinkManagementPage() {
     setIsDeleting(true);
 
     try {
-      const res = await fetch(`/api/links?id=${deletingLink.id}`, {
-        method: 'DELETE',
-      });
-
-      if (!res.ok) {
-        toast.error('Delete failed', 'Could not delete link.');
-        setIsDeleting(false);
-        return;
-      }
-
+      await deleteLink(deletingLink.id);
       toast.success('Link deleted', `"${deletingLink.title}" was removed.`);
       setDeletingLink(null);
-      fetchData();
     } catch (err) {
       console.error('Delete error:', err);
-      toast.error('Error', 'Failed to communicate with server.');
+      toast.error('Error', 'Failed to delete link.');
     } finally {
       setIsDeleting(false);
     }
@@ -342,7 +284,6 @@ export default function LinkManagementPage() {
           setIsLinkModalOpen(false);
           setEditingLink(null);
         }}
-        onSaved={fetchData}
         categories={categories}
         initialData={editingLink}
       />

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { Reorder } from 'framer-motion';
 import { useToast } from '@/components/ui/ToastContext';
-import { clientStore } from '@/lib/clientStore';
+import { useBiolink } from '@/context/BiolinkContext';
 
 interface OverviewItem {
   id: string;
@@ -26,33 +26,19 @@ interface OverviewItem {
 
 export default function OverviewPage() {
   const toast = useToast();
+  const { overviewItems, reorderOverview, loading } = useBiolink();
   const [items, setItems] = useState<OverviewItem[]>([]);
   const [initialItems, setInitialItems] = useState<OverviewItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  const fetchItems = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch('/api/overview/reorder');
-      if (res.ok) {
-        const data = await res.json();
-        setItems(data.items || []);
-        setInitialItems(data.items || []);
-        setHasChanges(false);
-      }
-    } catch (err) {
-      console.error('Error fetching overview items:', err);
-      toast.error('Error', 'Could not load overview items.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchItems();
-  }, []);
+    if (overviewItems) {
+      setItems(overviewItems);
+      setInitialItems(overviewItems);
+      setHasChanges(false);
+    }
+  }, [overviewItems]);
 
   const handleReorder = (newItems: OverviewItem[]) => {
     setItems(newItems);
@@ -63,31 +49,14 @@ export default function OverviewPage() {
     setIsSaving(true);
     try {
       const payload = items.map((it) => ({ id: it.id, type: it.type }));
-      const res = await fetch('/api/overview/reorder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: payload }),
-      });
-
-      if (!res.ok) {
-        toast.error('Save failed', 'Could not save new sequence.');
-        setIsSaving(false);
-        return;
-      }
-
-      // Sync master state to clientStore
-      const syncRes = await fetch('/api/sync');
-      if (syncRes.ok) {
-        const sJson = await syncRes.json();
-        if (sJson.data) clientStore.setLocalState(sJson.data);
-      }
+      await reorderOverview(payload);
 
       toast.success('Order saved', 'Public biolink sequence updated successfully!');
       setInitialItems(items);
       setHasChanges(false);
     } catch (err) {
       console.error('Save order error:', err);
-      toast.error('Error', 'Failed to communicate with server.');
+      toast.error('Error', 'Failed to save order.');
     } finally {
       setIsSaving(false);
     }

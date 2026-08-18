@@ -5,11 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Upload, Link as LinkIcon, Image as ImageIcon, Check } from 'lucide-react';
 import { Category, LinkItem } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
+import { useBiolink } from '@/context/BiolinkContext';
 
 interface LinkModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved?: () => void;
   categories: Category[];
   initialData?: LinkItem | null;
 }
@@ -22,6 +23,7 @@ export default function LinkModal({
   initialData,
 }: LinkModalProps) {
   const toast = useToast();
+  const { addLink, updateLink } = useBiolink();
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
   const [categoryId, setCategoryId] = useState<string>('');
@@ -56,7 +58,6 @@ export default function LinkModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Max 5MB
     if (file.size > 5 * 1024 * 1024) {
       toast.error('File too large', 'Max image size is 5MB.');
       return;
@@ -104,36 +105,32 @@ export default function LinkModal({
 
     setIsSubmitting(true);
 
-    const payload = {
-      ...(initialData && { id: initialData.id }),
-      title: title.trim(),
-      url: url.trim(),
-      category_id: categoryId || null,
-      thumbnail_url: hasThumbnail && thumbnailUrl.trim() ? thumbnailUrl.trim() : null,
-      is_active: isActive,
-    };
-
     try {
-      const res = await fetch('/api/links', {
-        method: initialData ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error('Save failed', data.error || 'Could not save link.');
-        setIsSubmitting(false);
-        return;
+      if (initialData) {
+        await updateLink(initialData.id, {
+          title: title.trim(),
+          url: url.trim(),
+          category_id: categoryId || null,
+          thumbnail_url: hasThumbnail && thumbnailUrl.trim() ? thumbnailUrl.trim() : null,
+          is_active: isActive,
+        });
+        toast.success('Link updated', `"${title}" has been saved.`);
+      } else {
+        await addLink({
+          title: title.trim(),
+          url: url.trim(),
+          category_id: categoryId || null,
+          thumbnail_url: hasThumbnail && thumbnailUrl.trim() ? thumbnailUrl.trim() : null,
+          is_active: isActive,
+        });
+        toast.success('Link created', `"${title}" has been added.`);
       }
 
-      toast.success(initialData ? 'Link updated' : 'Link created', `"${title}" has been saved.`);
-      onSaved();
+      if (onSaved) onSaved();
       onClose();
     } catch (err) {
       console.error('Error saving link:', err);
-      toast.error('Network error', 'Failed to communicate with server.');
+      toast.error('Error', 'Failed to save link.');
     } finally {
       setIsSubmitting(false);
     }

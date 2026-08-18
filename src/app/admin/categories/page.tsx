@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import AdminHeader from '@/components/admin/AdminHeader';
 import CategoryModal from '@/components/admin/CategoryModal';
 import ConfirmModal from '@/components/admin/ConfirmModal';
@@ -14,13 +14,11 @@ import {
 } from 'lucide-react';
 import { Category } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
-
-import { clientStore } from '@/lib/clientStore';
+import { useBiolink } from '@/context/BiolinkContext';
 
 export default function CategoryManagementPage() {
   const toast = useToast();
-  const [categories, setCategories] = useState<(Category & { link_count: number })[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { categories, toggleCategoryActive, deleteCategory, loading } = useBiolink();
 
   // Modals state
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -28,54 +26,14 @@ export default function CategoryManagementPage() {
   const [deletingCategory, setDeletingCategory] = useState<(Category & { link_count: number }) | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const fetchCategories = async () => {
-    try {
-      setLoading(true);
-      const [catsRes, syncRes] = await Promise.all([
-        fetch('/api/categories'),
-        fetch('/api/sync'),
-      ]);
-
-      if (catsRes.ok) {
-        const data = await catsRes.json();
-        setCategories(data.categories || []);
-      }
-      if (syncRes && syncRes.ok) {
-        const sData = await syncRes.json();
-        if (sData.data) {
-          clientStore.setLocalState(sData.data);
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching categories:', err);
-      toast.error('Load error', 'Could not load categories.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchCategories();
-  }, []);
-
   const handleToggleActive = async (cat: Category) => {
     try {
-      const res = await fetch('/api/categories', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: cat.id, is_active: !cat.is_active }),
-      });
-
-      if (res.ok) {
-        setCategories((prev) =>
-          prev.map((c) => (c.id === cat.id ? { ...c, is_active: !c.is_active } : c))
-        );
-        toast.info(
-          cat.is_active
-            ? `Category "${cat.name}" and its links hidden`
-            : `Category "${cat.name}" restored`
-        );
-      }
+      await toggleCategoryActive(cat.id);
+      toast.info(
+        cat.is_active
+          ? `Category "${cat.name}" and its links hidden`
+          : `Category "${cat.name}" restored`
+      );
     } catch (err) {
       console.error('Failed to toggle category active state:', err);
     }
@@ -86,25 +44,15 @@ export default function CategoryManagementPage() {
     setIsDeleting(true);
 
     try {
-      const res = await fetch(`/api/categories?id=${deletingCategory.id}`, {
-        method: 'DELETE',
-      });
-
-      if (!res.ok) {
-        toast.error('Delete failed', 'Could not delete category.');
-        setIsDeleting(false);
-        return;
-      }
-
+      await deleteCategory(deletingCategory.id);
       toast.success(
         'Category removed',
         `"${deletingCategory.name}" was deleted. Links were converted to standalone.`
       );
       setDeletingCategory(null);
-      fetchCategories();
     } catch (err) {
       console.error('Delete error:', err);
-      toast.error('Error', 'Failed to communicate with server.');
+      toast.error('Error', 'Failed to delete category.');
     } finally {
       setIsDeleting(false);
     }
@@ -226,7 +174,6 @@ export default function CategoryManagementPage() {
           setIsCategoryModalOpen(false);
           setEditingCategory(null);
         }}
-        onSaved={fetchCategories}
         initialData={editingCategory}
       />
 

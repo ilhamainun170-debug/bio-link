@@ -16,95 +16,35 @@ import {
 } from 'lucide-react';
 import { Profile, SocialLinks, DatabaseSchema } from '@/lib/types';
 import { useToast } from '@/components/ui/ToastContext';
-import { clientStore } from '@/lib/clientStore';
+import { useBiolink } from '@/context/BiolinkContext';
 
 export default function CustomizationPage() {
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const {
+    profile: contextProfile,
+    socials: contextSocials,
+    overviewItems,
+    links,
+    categories,
+    updateProfile,
+    importDatabase,
+    exportDatabase,
+    refreshData,
+    isCloudKV,
+    loading,
+  } = useBiolink();
 
-  const [profile, setProfile] = useState<Profile>({
-    id: 'default-profile',
-    name: '',
-    description: '',
-    photo_url: '',
-    theme_default: 'dark',
-    updated_at: '',
-  });
-
-  const [socials, setSocials] = useState<SocialLinks>({
-    x: '',
-    instagram: '',
-    threads: '',
-    youtube: '',
-    medium: '',
-    pinterest: '',
-    facebook: '',
-  });
-
-  const [previewItems, setPreviewItems] = useState<MixedItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile>(contextProfile);
+  const [socials, setSocials] = useState<SocialLinks>(contextSocials);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [isCloudKV, setIsCloudKV] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [profileRes, linksRes, catsRes, syncRes] = await Promise.all([
-        fetch('/api/profile'),
-        fetch('/api/links'),
-        fetch('/api/categories'),
-        fetch('/api/sync'),
-      ]);
-
-      if (syncRes.ok) {
-        const syncData = await syncRes.json();
-        setIsCloudKV(syncData.isCloudKV || false);
-        if (syncData.data) {
-          clientStore.setLocalState(syncData.data);
-        }
-      }
-
-      if (profileRes.ok) {
-        const pData = await profileRes.json();
-        if (pData.profile) setProfile(pData.profile);
-        if (pData.socials) setSocials(pData.socials);
-      }
-
-      if (linksRes.ok && catsRes.ok) {
-        const lData = await linksRes.json();
-        const cData = await catsRes.json();
-        const links = lData.links || [];
-        const cats = cData.categories || [];
-
-        const mixed: MixedItem[] = [];
-        links.forEach((l: any) => {
-          if (!l.category_id && l.is_active) {
-            mixed.push({ type: 'link', data: l });
-          }
-        });
-        cats.forEach((c: any) => {
-          if (c.is_active) {
-            const catLinks = links.filter((l: any) => l.category_id === c.id && l.is_active);
-            if (catLinks.length > 0) {
-              mixed.push({ type: 'category', data: c, links: catLinks });
-            }
-          }
-        });
-        setPreviewItems(mixed);
-      }
-    } catch (err) {
-      console.error('Failed to load profile data:', err);
-      toast.error('Error', 'Could not load profile configuration.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (contextProfile) setProfile(contextProfile);
+    if (contextSocials) setSocials(contextSocials);
+  }, [contextProfile, contextSocials]);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -147,51 +87,20 @@ export default function CustomizationPage() {
     setIsSaving(true);
 
     try {
-      const res = await fetch('/api/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile, socials }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error('Save failed', data.error || 'Could not save customization.');
-        setIsSaving(false);
-        return;
-      }
-
-      // Fetch complete DB and persist to clientStore
-      const syncRes = await fetch('/api/sync');
-      if (syncRes.ok) {
-        const sJson = await syncRes.json();
-        if (sJson.data) {
-          clientStore.setLocalState(sJson.data);
-        }
-      }
-
+      await updateProfile(profile, socials);
       toast.success('Saved!', 'Your profile and social media links have been updated.');
     } catch (err) {
       console.error('Profile save error:', err);
-      toast.error('Error', 'Failed to communicate with server.');
+      toast.error('Error', 'Failed to save customization.');
     } finally {
       setIsSaving(false);
     }
   };
 
   // Export Backup
-  const handleExportBackup = async () => {
-    try {
-      const res = await fetch('/api/sync');
-      if (res.ok) {
-        const json = await res.json();
-        clientStore.exportBackupJson(json.data);
-        toast.success('Backup exported', 'Saved complete biolink database JSON.');
-      }
-    } catch (err) {
-      console.error('Export error:', err);
-      toast.error('Export error', 'Could not export backup.');
-    }
+  const handleExportBackup = () => {
+    exportDatabase();
+    toast.success('Backup exported', 'Saved complete biolink database JSON.');
   };
 
   // Import Backup
@@ -205,17 +114,11 @@ export default function CustomizationPage() {
         const content = event.target?.result as string;
         const parsed: DatabaseSchema = JSON.parse(content);
 
-        if (!parsed.profile || !Array.isArray(parsed.links) || !Array.isArray(parsed.categories)) {
-          toast.error('Invalid backup format', 'The uploaded file is not a valid BioLink database JSON.');
-          return;
-        }
-
-        const success = await clientStore.pushToServer(parsed);
+        const success = await importDatabase(parsed);
         if (success) {
           toast.success('Backup restored!', 'All links, categories, and customizations have been restored.');
-          fetchData();
         } else {
-          toast.error('Restore failed', 'Server could not process backup JSON.');
+          toast.error('Restore failed', 'Invalid BioLink database format.');
         }
       } catch (err) {
         console.error('Parse error:', err);
@@ -230,17 +133,30 @@ export default function CustomizationPage() {
   const handleManualSync = async () => {
     setIsSyncing(true);
     try {
-      const synced = await clientStore.syncWithServer();
-      if (synced) {
-        toast.success('Synced!', 'Client and server state are in sync.');
-        fetchData();
-      }
+      await refreshData();
+      toast.success('Synced!', 'Client and server state are in sync.');
     } catch (err) {
       console.error('Sync error:', err);
     } finally {
       setIsSyncing(false);
     }
   };
+
+  // Build real-time preview items
+  const previewItems: MixedItem[] = [];
+  links.forEach((l) => {
+    if (!l.category_id && l.is_active) {
+      previewItems.push({ type: 'link', data: l });
+    }
+  });
+  categories.forEach((c) => {
+    if (c.is_active) {
+      const catLinks = links.filter((l) => l.category_id === c.id && l.is_active);
+      if (catLinks.length > 0) {
+        previewItems.push({ type: 'category', data: c, links: catLinks });
+      }
+    }
+  });
 
   const socialFields: { key: keyof SocialLinks; label: string; placeholder: string }[] = [
     { key: 'x', label: 'X (formerly Twitter)', placeholder: 'https://x.com/yourhandle' },
@@ -445,13 +361,13 @@ export default function CustomizationPage() {
                     }`}
                   >
                     <Cloud className="w-3.5 h-3.5" />
-                    <span>{isCloudKV ? 'Cloud Redis Active' : 'Client Sync Active'}</span>
+                    <span>{isCloudKV ? 'Cloud Redis Active' : 'Master Store Active'}</span>
                   </span>
                 </div>
               </div>
 
               <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-                Your data is continuously preserved in your browser's persistent store and synced to the server. You can also export or import your entire link database anytime as a JSON backup.
+                Your data is stored permanently in your browser master storage and synchronized with the server. You can also export or import your entire link database anytime as a JSON backup.
               </p>
 
               <div className="flex flex-wrap items-center gap-3 pt-2">

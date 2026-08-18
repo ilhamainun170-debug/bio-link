@@ -10,6 +10,7 @@ import ThumbnailLightbox from './ThumbnailLightbox';
 import ThemeToggle from './ThemeToggle';
 import Link from 'next/link';
 import { Lock } from 'lucide-react';
+import { useBiolink } from '@/context/BiolinkContext';
 
 export type MixedItem =
   | { type: 'link'; data: LinkItem }
@@ -25,7 +26,55 @@ interface PublicBioViewProps {
 }
 
 export default function PublicBioView({ initialData, isPreview = false }: PublicBioViewProps) {
-  const { profile, socials, items } = initialData;
+  const { profile: liveProfile, socials: liveSocials, links: liveLinks, categories: liveCategories, overviewItems } = useBiolink();
+
+  const profile = isPreview ? initialData.profile : (liveProfile || initialData.profile);
+  const socials = isPreview ? initialData.socials : (liveSocials || initialData.socials);
+
+  let items = initialData.items;
+  if (!isPreview && liveLinks) {
+    const activeCats = new Map(liveCategories.filter((c) => c.is_active).map((c) => [c.id, c]));
+    const linkMap = new Map(liveLinks.filter((l) => l.is_active && !l.category_id).map((l) => [l.id, l]));
+
+    const mixed: MixedItem[] = [];
+    const processed = new Set<string>();
+
+    (overviewItems || []).forEach((ord) => {
+      if (ord.type === 'link' && linkMap.has(ord.id) && ord.isActive) {
+        mixed.push({ type: 'link', data: linkMap.get(ord.id)! });
+        processed.add(`link-${ord.id}`);
+      } else if (ord.type === 'category' && activeCats.has(ord.id) && ord.isActive) {
+        const cat = activeCats.get(ord.id)!;
+        const catLinks = liveLinks.filter((l) => l.category_id === cat.id && l.is_active);
+        if (catLinks.length > 0) {
+          mixed.push({ type: 'category', data: cat, links: catLinks });
+        }
+        processed.add(`cat-${ord.id}`);
+      }
+    });
+
+    // Add remaining standalone links
+    liveLinks.filter((l) => l.is_active && !l.category_id).forEach((l) => {
+      if (!processed.has(`link-${l.id}`)) {
+        mixed.push({ type: 'link', data: l });
+        processed.add(`link-${l.id}`);
+      }
+    });
+
+    // Add remaining active categories
+    activeCats.forEach((c) => {
+      if (!processed.has(`cat-${c.id}`)) {
+        const catLinks = liveLinks.filter((l) => l.category_id === c.id && l.is_active);
+        if (catLinks.length > 0) {
+          mixed.push({ type: 'category', data: c, links: catLinks });
+        }
+        processed.add(`cat-${c.id}`);
+      }
+    });
+
+    items = mixed;
+  }
+
   const [lightboxState, setLightboxState] = useState<{ isOpen: boolean; imageUrl: string | null; title: string }>({
     isOpen: false,
     imageUrl: null,
@@ -90,7 +139,7 @@ export default function PublicBioView({ initialData, isPreview = false }: Public
                   category={item.data}
                   links={item.links}
                   onOpenThumbnail={handleOpenThumbnail}
-                  defaultExpanded={index === 0} // expand first category by default for great UX
+                  defaultExpanded={index === 0}
                 />
               );
             }
