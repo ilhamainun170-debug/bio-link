@@ -19,9 +19,10 @@ import { useToast } from '@/components/ui/ToastContext';
 interface AdminSidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  onLogout?: () => void;
 }
 
-export default function AdminSidebar({ isOpen, onClose }: AdminSidebarProps) {
+export default function AdminSidebar({ isOpen, onClose, onLogout }: AdminSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
@@ -36,14 +37,15 @@ export default function AdminSidebar({ isOpen, onClose }: AdminSidebarProps) {
   ];
 
   const handleLogout = async () => {
+    sessionStorage.removeItem('tolvane_admin_session');
+    if (onLogout) onLogout();
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      toast.info('Logged out', 'You have ended your admin session.');
-      router.replace('/admin/login');
     } catch (err) {
       console.error('Logout error:', err);
-      router.replace('/admin/login');
     }
+    toast.info('Logged out', 'You have ended your admin session.');
+    router.push('/');
   };
 
   return (
@@ -58,15 +60,18 @@ export default function AdminSidebar({ isOpen, onClose }: AdminSidebarProps) {
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 left-0 bottom-0 z-40 w-64 bg-white dark:bg-[#181A22] border-r border-gray-200 dark:border-[#2E3240] flex flex-col justify-between transition-transform duration-300 ease-in-out ${
-          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-white dark:bg-[#181A22] border-r border-gray-200/90 dark:border-[#2E3240] flex flex-col justify-between transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Top Logo / Header */}
         <div>
-          <div className="h-16 px-5 flex items-center justify-between border-b border-gray-100 dark:border-[#2E3240]">
-            <Link href="/admin" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md">
+          {/* Logo Brand Header */}
+          <div className="h-16 px-6 border-b border-gray-100 dark:border-[#2E3240] flex items-center justify-between">
+            <Link
+              href="/admin"
+              className="flex items-center gap-2.5 group"
+            >
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold text-sm shadow-soft-sm group-hover:scale-105 transition-transform">
                 B
               </div>
               <span className="font-bold text-base text-gray-900 dark:text-gray-100 tracking-tight">
@@ -125,10 +130,10 @@ export default function AdminSidebar({ isOpen, onClose }: AdminSidebarProps) {
 
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors text-left"
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors text-left cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
-            <span>Log Out</span>
+            <span>Exit Admin Session</span>
           </button>
         </div>
       </aside>
