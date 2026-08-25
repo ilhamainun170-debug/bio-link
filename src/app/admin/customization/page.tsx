@@ -418,7 +418,7 @@ export default function CustomizationPage() {
               </div>
 
               {/* Smartphone Frame */}
-              <div className="relative w-full max-w-[340px] aspect-[9/18.5] bg-[#14161C] rounded-[44px] p-3 shadow-2xl border-[6px] border-[#2A2D3A] overflow-hidden flex flex-col justify-between">
+              <div className="relative w-full max-w-[290px] min-[380px]:max-w-[340px] aspect-[9/18.5] bg-[#14161C] rounded-[36px] min-[380px]:rounded-[44px] p-2.5 min-[380px]:p-3 shadow-2xl border-[4px] min-[380px]:border-[6px] border-[#2A2D3A] overflow-hidden flex flex-col justify-between">
                 {/* Dynamic island / Notch pill */}
                 <div className="w-24 h-4 bg-black rounded-full mx-auto mb-2 shrink-0 z-20" />
 

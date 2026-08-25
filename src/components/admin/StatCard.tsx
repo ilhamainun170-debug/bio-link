@@ -29,22 +29,22 @@ export default function StatCard({
   }[color];
 
   return (
-    <div className="bg-white dark:bg-[#20222C] rounded-2xl p-4 sm:p-5 border border-gray-200/90 dark:border-[#2E3240] shadow-soft-sm hover:shadow-soft-md transition-all duration-200 flex flex-col justify-between">
-      <div className="flex items-start justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+    <div className="bg-white dark:bg-[#20222C] rounded-2xl p-3.5 sm:p-5 border border-gray-200/90 dark:border-[#2E3240] shadow-soft-sm hover:shadow-soft-md transition-all duration-200 flex flex-col justify-between min-w-0">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 truncate">
           {label}
         </p>
-        <div className={`p-2 rounded-xl border ${colorStyles}`}>
-          <Icon className="w-4 h-4" />
+        <div className={`p-1.5 sm:p-2 rounded-xl border shrink-0 ${colorStyles}`}>
+          <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </div>
       </div>
 
-      <div className="mt-3">
-        <p className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 tracking-tight">
+      <div className="mt-2 sm:mt-3 min-w-0">
+        <p className="text-xl sm:text-3xl font-extrabold text-gray-900 dark:text-gray-100 tracking-tight truncate">
           {value}
         </p>
         {subtext && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-medium">
+          <p className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 mt-0.5 sm:mt-1 font-medium truncate">
             {subtext}
           </p>
         )}

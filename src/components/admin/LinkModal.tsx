@@ -140,7 +140,7 @@ export default function LinkModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -153,10 +153,10 @@ export default function LinkModal({
           initial={{ opacity: 0, scale: 0.96, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 10 }}
-          className="relative z-10 w-full max-w-lg bg-white dark:bg-[#20222C] rounded-2xl shadow-dark-lg border border-gray-200 dark:border-[#2E3240] overflow-hidden my-8"
+          className="relative z-10 w-full max-w-lg bg-white dark:bg-[#20222C] rounded-2xl shadow-dark-lg border border-gray-200 dark:border-[#2E3240] overflow-hidden my-auto max-h-[90vh] flex flex-col"
         >
           {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-100 dark:border-[#2E3240] flex items-center justify-between">
+          <div className="px-5 sm:px-6 py-3.5 sm:py-4 border-b border-gray-100 dark:border-[#2E3240] flex items-center justify-between shrink-0">
             <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">
               {initialData ? 'Edit Link' : 'Add New Link'}
             </h2>
@@ -168,8 +168,8 @@ export default function LinkModal({
             </button>
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+          {/* Form Content */}
+          <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
             {/* Title */}
             <div>
               <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1.5">
