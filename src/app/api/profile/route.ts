@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { isAuthenticated } from '@/lib/auth';
+import { db, syncToPostgres } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,15 +15,12 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
     const { profile, socials } = body;
 
     const updated = db.updateProfile(profile || {}, socials);
+    await syncToPostgres(db.get());
+
     return NextResponse.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error updating profile:', error);

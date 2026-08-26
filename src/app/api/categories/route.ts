@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { isAuthenticated } from '@/lib/auth';
+import { db, syncToPostgres } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
@@ -14,11 +15,6 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
     const { name } = body;
 
@@ -27,6 +23,8 @@ export async function POST(req: NextRequest) {
     }
 
     const created = db.createCategory(name.trim());
+    await syncToPostgres(db.get());
+
     return NextResponse.json({ success: true, category: created }, { status: 201 });
   } catch (error) {
     console.error('Error creating category:', error);
@@ -36,11 +34,6 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
     const { id, name, is_active } = body;
 
@@ -57,6 +50,8 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Category not found' }, { status: 404 });
     }
 
+    await syncToPostgres(db.get());
+
     return NextResponse.json({ success: true, category: updated });
   } catch (error) {
     console.error('Error updating category:', error);
@@ -66,11 +61,6 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 
@@ -82,6 +72,8 @@ export async function DELETE(req: NextRequest) {
     if (!deleted) {
       return NextResponse.json({ error: 'Category not found' }, { status: 404 });
     }
+
+    await syncToPostgres(db.get());
 
     return NextResponse.json({ success: true, message: 'Category deleted' });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { isAuthenticated } from '@/lib/auth';
+import { db, syncToPostgres } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
@@ -14,11 +15,6 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
     const { title, url, thumbnail_url, category_id, is_active } = body;
 
@@ -30,7 +26,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 });
     }
 
-    // Basic URL validation
     let validUrl = url.trim();
     if (!/^https?:\/\//i.test(validUrl) && !/^mailto:/i.test(validUrl) && !/^tel:/i.test(validUrl)) {
       validUrl = `https://${validUrl}`;
@@ -44,6 +39,8 @@ export async function POST(req: NextRequest) {
       is_active: is_active !== undefined ? Boolean(is_active) : true,
     });
 
+    await syncToPostgres(db.get());
+
     return NextResponse.json({ success: true, link: created }, { status: 201 });
   } catch (error) {
     console.error('Error creating link:', error);
@@ -53,11 +50,6 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
     const { id, title, url, thumbnail_url, category_id, is_active } = body;
 
@@ -87,6 +79,8 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Link not found' }, { status: 404 });
     }
 
+    await syncToPostgres(db.get());
+
     return NextResponse.json({ success: true, link: updated });
   } catch (error) {
     console.error('Error updating link:', error);
@@ -96,11 +90,6 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 
@@ -112,6 +101,8 @@ export async function DELETE(req: NextRequest) {
     if (!deleted) {
       return NextResponse.json({ error: 'Link not found' }, { status: 404 });
     }
+
+    await syncToPostgres(db.get());
 
     return NextResponse.json({ success: true, message: 'Link deleted' });
   } catch (error) {

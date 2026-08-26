@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { isAuthenticated } from '@/lib/auth';
+import { db, syncToPostgres } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
@@ -14,11 +15,6 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
     const { items } = body;
 
@@ -27,6 +23,8 @@ export async function POST(req: NextRequest) {
     }
 
     db.updateOverviewOrder(items);
+    await syncToPostgres(db.get());
+
     return NextResponse.json({ success: true, message: 'Order updated successfully' });
   } catch (error) {
     console.error('Error updating overview order:', error);
