@@ -44,6 +44,23 @@ interface BiolinkContextType {
 
 const BiolinkContext = createContext<BiolinkContextType | undefined>(undefined);
 
+function getInitialLocalData(): DatabaseSchema {
+  if (typeof window !== 'undefined') {
+    for (const k of ALL_STORAGE_KEYS) {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.profile && Array.isArray(parsed.links)) {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+  }
+  return generateSeedData();
+}
+
 function calculateStats(data: DatabaseSchema, daysRange = 30): AnalyticsSummary {
   const now = new Date();
   const totalClicks = data.links.reduce((acc, l) => acc + (l.click_count || 0), 0);
@@ -200,11 +217,10 @@ function computeOverviewItems(data: DatabaseSchema) {
 
 export function BiolinkProvider({ children }: { children: React.ReactNode }) {
   const toast = useToast();
-  const [data, setData] = useState<DatabaseSchema>(() => generateSeedData());
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DatabaseSchema>(getInitialLocalData);
+  const [loading, setLoading] = useState(false);
   const [isCloudKV, setIsCloudKV] = useState(true);
 
-  // Sync to localStorage and Neon Cloud Database
   const persistState = useCallback(async (nextState: DatabaseSchema) => {
     setData(nextState);
     if (typeof window !== 'undefined') {
@@ -226,10 +242,7 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Load initial data from server (Neon PostgreSQL) first
   const loadInitialData = useCallback(async () => {
-    setLoading(true);
-
     try {
       const res = await fetch('/api/sync');
       if (res.ok) {
@@ -242,32 +255,13 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
           if (typeof window !== 'undefined') {
             ALL_STORAGE_KEYS.forEach((k) => localStorage.setItem(k, JSON.stringify(serverData)));
           }
-          setLoading(false);
-          return;
         }
       }
     } catch (err) {
       console.warn('Neon Cloud fetch error:', err);
+    } finally {
+      setLoading(false);
     }
-
-    // Fallback to local storage if server fetch fails
-    if (typeof window !== 'undefined') {
-      try {
-        for (const k of ALL_STORAGE_KEYS) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed && parsed.profile && Array.isArray(parsed.links)) {
-              setData(parsed);
-              break;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Local parse error:', e);
-      }
-    }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
