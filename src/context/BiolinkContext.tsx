@@ -6,12 +6,12 @@ import { generateSeedData } from '@/lib/seed';
 import { useToast } from '@/components/ui/ToastContext';
 
 const STORAGE_KEY = 'biolink_master_db_v2';
+const ALL_STORAGE_KEYS = ['biolink_master_db_v2', 'biolink_admin_master_v1', 'biolink_master_db', 'biolink_admin_backup'];
 
 interface BiolinkContextType {
   data: DatabaseSchema;
   loading: boolean;
   isCloudKV: boolean;
-  // Computed helpers
   links: LinkItem[];
   categories: (Category & { link_count: number })[];
   profile: Profile;
@@ -26,7 +26,6 @@ interface BiolinkContextType {
     childCount?: number;
     thumbnail_url?: string | null;
   }>;
-  // Actions
   updateProfile: (profileUpdate: Partial<Profile>, socialsUpdate?: Partial<SocialLinks>) => Promise<boolean>;
   addLink: (linkData: { title: string; url: string; category_id?: string | null; thumbnail_url?: string | null; is_active?: boolean }) => Promise<boolean>;
   updateLink: (id: string, linkData: Partial<LinkItem>) => Promise<boolean>;
@@ -203,20 +202,20 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
   const toast = useToast();
   const [data, setData] = useState<DatabaseSchema>(() => generateSeedData());
   const [loading, setLoading] = useState(true);
-  const [isCloudKV, setIsCloudKV] = useState(false);
+  const [isCloudKV, setIsCloudKV] = useState(true);
 
   // Sync to localStorage and server
   const persistState = useCallback(async (nextState: DatabaseSchema) => {
     setData(nextState);
     if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+        ALL_STORAGE_KEYS.forEach((k) => localStorage.setItem(k, JSON.stringify(nextState)));
       } catch (err) {
         console.warn('LocalStorage save failed:', err);
       }
     }
 
-    // Push to server in background
+    // Push directly to Neon PostgreSQL cloud database
     try {
       await fetch('/api/sync', {
         method: 'POST',
@@ -228,19 +227,21 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initial load
+  // Initial load with automatic cloud push
   const loadInitialData = useCallback(async () => {
     setLoading(true);
 
-    // 1. Check local storage first
     let localSaved: DatabaseSchema | null = null;
     if (typeof window !== 'undefined') {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          localSaved = JSON.parse(raw);
-          if (localSaved && localSaved.profile && Array.isArray(localSaved.links)) {
-            setData(localSaved);
+        for (const k of ALL_STORAGE_KEYS) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.profile && Array.isArray(parsed.links)) {
+              localSaved = parsed;
+              break;
+            }
           }
         }
       } catch (e) {
@@ -248,18 +249,28 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // 2. Fetch server database
+    // If localSaved exists, set immediately and push to Neon Cloud Database
+    if (localSaved) {
+      setData(localSaved);
+      fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: localSaved }),
+      }).catch(() => {});
+    }
+
+    // Fetch latest server database from Neon Cloud
     try {
       const res = await fetch('/api/sync');
       if (res.ok) {
         const json = await res.json();
-        setIsCloudKV(json.isCloudKV || false);
+        setIsCloudKV(true);
         const serverData: DatabaseSchema = json.data;
 
-        if (serverData && serverData.links) {
-          // If local storage has user edits and server has fresh seed, push local to server
-          if (localSaved && localSaved.profile && JSON.stringify(localSaved.links) !== JSON.stringify(serverData.links)) {
-            // Keep localSaved and sync to server
+        if (serverData && serverData.links && serverData.links.length > 0) {
+          // Check if local version has more recent custom edits
+          if (localSaved && localSaved.profile && JSON.stringify(localSaved.profile) !== JSON.stringify(serverData.profile)) {
+            // Keep local data & sync to Neon Cloud
             await fetch('/api/sync', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -268,7 +279,7 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
           } else {
             setData(serverData);
             if (typeof window !== 'undefined') {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(serverData));
+              ALL_STORAGE_KEYS.forEach((k) => localStorage.setItem(k, JSON.stringify(serverData)));
             }
           }
         }
@@ -458,7 +469,6 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
     const nextCats = data.categories.filter((c) => c.id !== id);
     const nextOverview = (data.overview_order || []).filter((o) => !(o.type === 'category' && o.id === id));
 
-    // Convert child links to standalone
     const nextLinks = data.links.map((link) => {
       if (link.category_id === id) {
         return { ...link, category_id: null };
@@ -466,7 +476,6 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
       return link;
     });
 
-    // Add orphaned links to overview
     nextLinks.forEach((link) => {
       if (link.category_id === null) {
         const exists = nextOverview.some((o) => o.id === link.id && o.type === 'link');
@@ -543,7 +552,6 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
     URL.revokeObjectURL(url);
   };
 
-  // Computed values
   const categoriesWithCounts = data.categories.map((cat) => ({
     ...cat,
     link_count: data.links.filter((l) => l.category_id === cat.id).length,
