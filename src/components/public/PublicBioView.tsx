@@ -26,11 +26,12 @@ interface PublicBioViewProps {
 export default function PublicBioView({ initialData, isPreview = false }: PublicBioViewProps) {
   const { profile: liveProfile, socials: liveSocials, links: liveLinks, categories: liveCategories, overviewItems } = useBiolink();
 
-  const profile = isPreview ? initialData.profile : (liveProfile || initialData.profile);
-  const socials = isPreview ? initialData.socials : (liveSocials || initialData.socials);
+  const hasLiveUpdate = isPreview || (liveProfile && liveProfile.updated_at && liveProfile.updated_at !== initialData.profile.updated_at);
+  const profile = hasLiveUpdate ? liveProfile : initialData.profile;
+  const socials = hasLiveUpdate ? liveSocials : initialData.socials;
 
   let items = initialData.items;
-  if (!isPreview && liveLinks) {
+  if (hasLiveUpdate && liveLinks) {
     const activeCats = new Map(liveCategories.filter((c) => c.is_active).map((c) => [c.id, c]));
     const linkMap = new Map(liveLinks.filter((l) => l.is_active && !l.category_id).map((l) => [l.id, l]));
 
@@ -51,7 +52,6 @@ export default function PublicBioView({ initialData, isPreview = false }: Public
       }
     });
 
-    // Add remaining standalone links
     liveLinks.filter((l) => l.is_active && !l.category_id).forEach((l) => {
       if (!processed.has(`link-${l.id}`)) {
         mixed.push({ type: 'link', data: l });
@@ -59,7 +59,6 @@ export default function PublicBioView({ initialData, isPreview = false }: Public
       }
     });
 
-    // Add remaining active categories
     activeCats.forEach((c) => {
       if (!processed.has(`cat-${c.id}`)) {
         const catLinks = liveLinks.filter((l) => l.category_id === c.id && l.is_active);

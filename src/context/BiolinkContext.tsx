@@ -204,7 +204,7 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isCloudKV, setIsCloudKV] = useState(true);
 
-  // Sync to localStorage and server
+  // Sync to localStorage and Neon Cloud Database
   const persistState = useCallback(async (nextState: DatabaseSchema) => {
     setData(nextState);
     if (typeof window !== 'undefined') {
@@ -215,7 +215,6 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // Push directly to Neon PostgreSQL cloud database
     try {
       await fetch('/api/sync', {
         method: 'POST',
@@ -227,11 +226,31 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initial load with automatic cloud push
+  // Load initial data from server (Neon PostgreSQL) first
   const loadInitialData = useCallback(async () => {
     setLoading(true);
 
-    let localSaved: DatabaseSchema | null = null;
+    try {
+      const res = await fetch('/api/sync');
+      if (res.ok) {
+        const json = await res.json();
+        setIsCloudKV(true);
+        const serverData: DatabaseSchema = json.data;
+
+        if (serverData && serverData.links) {
+          setData(serverData);
+          if (typeof window !== 'undefined') {
+            ALL_STORAGE_KEYS.forEach((k) => localStorage.setItem(k, JSON.stringify(serverData)));
+          }
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Neon Cloud fetch error:', err);
+    }
+
+    // Fallback to local storage if server fetch fails
     if (typeof window !== 'undefined') {
       try {
         for (const k of ALL_STORAGE_KEYS) {
@@ -239,7 +258,7 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
           if (raw) {
             const parsed = JSON.parse(raw);
             if (parsed && parsed.profile && Array.isArray(parsed.links)) {
-              localSaved = parsed;
+              setData(parsed);
               break;
             }
           }
@@ -248,47 +267,7 @@ export function BiolinkProvider({ children }: { children: React.ReactNode }) {
         console.warn('Local parse error:', e);
       }
     }
-
-    // If localSaved exists, set immediately and push to Neon Cloud Database
-    if (localSaved) {
-      setData(localSaved);
-      fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: localSaved }),
-      }).catch(() => {});
-    }
-
-    // Fetch latest server database from Neon Cloud
-    try {
-      const res = await fetch('/api/sync');
-      if (res.ok) {
-        const json = await res.json();
-        setIsCloudKV(true);
-        const serverData: DatabaseSchema = json.data;
-
-        if (serverData && serverData.links && serverData.links.length > 0) {
-          // Check if local version has more recent custom edits
-          if (localSaved && localSaved.profile && JSON.stringify(localSaved.profile) !== JSON.stringify(serverData.profile)) {
-            // Keep local data & sync to Neon Cloud
-            await fetch('/api/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ data: localSaved }),
-            });
-          } else {
-            setData(serverData);
-            if (typeof window !== 'undefined') {
-              ALL_STORAGE_KEYS.forEach((k) => localStorage.setItem(k, JSON.stringify(serverData)));
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Initial sync error:', err);
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
