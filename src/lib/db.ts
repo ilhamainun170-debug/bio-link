@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { neon } from '@neondatabase/serverless';
 import { DatabaseSchema, LinkItem, Category, Profile, SocialLinks, OverviewOrderItem, AnalyticsSummary, ClickEvent } from './types';
 import { generateSeedData } from './seed';
 
@@ -11,71 +12,92 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 // Memory cache
 let memoryDb: DatabaseSchema | null = null;
 
-// Helper to check if KV / Redis is available
+const NEON_CONNECTION_STRING = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_MKNICH7vE9AZ@ep-silent-frog-b3qxmdg6-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require';
+
+// Helper SQL client for Neon
+function getNeonSql() {
+  if (!NEON_CONNECTION_STRING) return null;
+  try {
+    return neon(NEON_CONNECTION_STRING);
+  } catch (err) {
+    console.error('Neon SQL client init error:', err);
+    return null;
+  }
+}
+
+export function isPostgresConfigured(): boolean {
+  return !!NEON_CONNECTION_STRING;
+}
+
+// Sync schema to Neon PostgreSQL
+export async function syncToPostgres(data: DatabaseSchema): Promise<void> {
+  const sql = getNeonSql();
+  if (!sql) return;
+
+  try {
+    const jsonString = JSON.stringify(data);
+    await sql`
+      CREATE TABLE IF NOT EXISTS biolink_store (
+        id VARCHAR(50) PRIMARY KEY,
+        data JSONB NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+    await sql`
+      INSERT INTO biolink_store (id, data, updated_at)
+      VALUES ('main', ${jsonString}::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE
+      SET data = EXCLUDED.data, updated_at = NOW();
+    `;
+    memoryDb = data;
+  } catch (err) {
+    console.warn('Neon Postgres sync error:', err);
+  }
+}
+
+// Fetch schema from Neon PostgreSQL
+export async function fetchFromPostgres(): Promise<DatabaseSchema | null> {
+  const sql = getNeonSql();
+  if (!sql) return null;
+
+  try {
+    const rows = await sql`
+      SELECT data FROM biolink_store WHERE id = 'main' LIMIT 1;
+    `;
+    if (rows && rows.length > 0 && rows[0].data) {
+      const parsed = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
+      if (parsed && parsed.links) {
+        memoryDb = parsed;
+        try {
+          if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+          fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
+        } catch {}
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Neon Postgres fetch error:', err);
+  }
+  return null;
+}
+
+// Upstash KV / Redis legacy compatibility
 export function isKVConfigured(): boolean {
-  return !!(
+  return isPostgresConfigured() || !!(
     (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) ||
     (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
   );
 }
 
-// Sync to Upstash / Vercel KV if configured
 export async function syncToKV(data: DatabaseSchema): Promise<void> {
-  const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-
-  if (kvUrl && kvToken) {
-    try {
-      await fetch(`${kvUrl}/set/biolink_data`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${kvToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-    } catch (err) {
-      console.warn('KV sync warning:', err);
-    }
-  }
+  await syncToPostgres(data);
 }
 
-// Fetch from Upstash / Vercel KV
 export async function fetchFromKV(): Promise<DatabaseSchema | null> {
-  const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-
-  if (kvUrl && kvToken) {
-    try {
-      const res = await fetch(`${kvUrl}/get/biolink_data`, {
-        headers: {
-          Authorization: `Bearer ${kvToken}`,
-        },
-        cache: 'no-store',
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.result) {
-          const parsed = typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
-          if (parsed && parsed.links) {
-            memoryDb = parsed;
-            try {
-              if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-              fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
-            } catch {}
-            return parsed;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('KV fetch error:', err);
-    }
-  }
-  return null;
+  return await fetchFromPostgres();
 }
 
 function ensureDbFile(): DatabaseSchema {
-  // Always try to read from disk first to guarantee fresh data across processes
   try {
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
@@ -87,12 +109,10 @@ function ensureDbFile(): DatabaseSchema {
     console.error('Error reading DB file:', err);
   }
 
-  // If memory cache exists and has valid data, use it
   if (memoryDb && memoryDb.links) {
     return memoryDb;
   }
 
-  // Initialize with seed data
   const seed = generateSeedData();
   saveDb(seed);
   memoryDb = seed;
@@ -110,8 +130,8 @@ function saveDb(data: DatabaseSchema): void {
     console.error('Error saving DB file:', err);
   }
 
-  // Non-blocking sync to cloud KV if available
-  syncToKV(data).catch(() => {});
+  // Non-blocking sync to Neon PostgreSQL
+  syncToPostgres(data).catch(() => {});
 }
 
 export const db = {
@@ -123,12 +143,10 @@ export const db = {
     saveDb(data);
   },
 
-  // Bulk replace (for restore or client state sync)
   bulkSync(data: DatabaseSchema): void {
     saveDb(data);
   },
 
-  // Profile & Socials
   getProfile(): { profile: Profile; socials: SocialLinks } {
     const data = this.get();
     return { profile: data.profile, socials: data.socials };
@@ -151,12 +169,10 @@ export const db = {
     return { profile: data.profile, socials: data.socials };
   },
 
-  // Public visitor view with effective active states & mixed order
   getPublicView() {
     const data = this.get();
     const { profile, socials, categories, links, overview_order } = data;
 
-    // Active categories map
     const activeCategoryMap = new Map<string, Category>();
     categories.forEach(cat => {
       if (cat.is_active) {
@@ -164,7 +180,6 @@ export const db = {
       }
     });
 
-    // Compute effective active state for links
     const effectiveActiveLinks = links.filter(link => {
       if (!link.is_active) return false;
       if (link.category_id) {
@@ -174,7 +189,6 @@ export const db = {
       return true;
     });
 
-    // Group active links by category
     const categoryLinksMap = new Map<string, LinkItem[]>();
     const standaloneLinks: LinkItem[] = [];
 
@@ -188,7 +202,6 @@ export const db = {
       }
     });
 
-    // Sort category inner links by sort_order
     categoryLinksMap.forEach((list) => {
       list.sort((a, b) => a.sort_order - b.sort_order);
     });
@@ -219,7 +232,6 @@ export const db = {
       }
     });
 
-    // Append any standalone links or active categories that were not yet in overview_order
     standaloneLinks.forEach(link => {
       if (!processedIds.has(`link-${link.id}`)) {
         mixedStream.push({ type: 'link', data: link });
@@ -242,7 +254,6 @@ export const db = {
     };
   },
 
-  // Links CRUD
   getLinks(): LinkItem[] {
     const data = this.get();
     return data.links.sort((a, b) => a.sort_order - b.sort_order);
@@ -269,7 +280,6 @@ export const db = {
 
     data.links.push(link);
 
-    // If standalone link, also add to overview order at the bottom
     if (!link.category_id) {
       const maxOrder = data.overview_order.reduce((max, it) => Math.max(max, it.sort_order), -1);
       data.overview_order.push({
@@ -325,7 +335,6 @@ export const db = {
     return true;
   },
 
-  // Categories CRUD
   getCategories(): (Category & { link_count: number })[] {
     const data = this.get();
     return data.categories
@@ -401,7 +410,6 @@ export const db = {
     return true;
   },
 
-  // Overview Mixed Drag & Drop Reorder
   getOverviewItems() {
     const data = this.get();
     const { categories, links, overview_order } = data;
@@ -490,7 +498,6 @@ export const db = {
     this.save(data);
   },
 
-  // Click Tracking & Analytics
   trackClick(linkId: string, info?: { referrer?: string; user_agent?: string }): boolean {
     const data = this.get();
     const link = data.links.find(l => l.id === linkId);
