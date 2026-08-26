@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db, isKVConfigured, fetchFromKV } from '@/lib/db';
-import { isAuthenticated } from '@/lib/auth';
+import { db, syncToPostgres, fetchFromPostgres } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    // If KV is configured, attempt to pull latest cloud state
-    if (isKVConfigured()) {
-      await fetchFromKV();
-    }
-
+    await fetchFromPostgres();
     const data = db.get();
     return NextResponse.json({
       data,
-      isCloudKV: isKVConfigured(),
+      isCloudKV: true,
     });
   } catch (error) {
     console.error('Sync GET error:', error);
@@ -24,24 +19,20 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await isAuthenticated();
-    if (!auth) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
     const { data } = body;
 
-    if (!data || !Array.isArray(data.links) || !Array.isArray(data.categories)) {
+    if (!data || !data.profile || !Array.isArray(data.links) || !Array.isArray(data.categories)) {
       return NextResponse.json({ error: 'Invalid database payload' }, { status: 400 });
     }
 
     db.bulkSync(data);
+    await syncToPostgres(data);
 
     return NextResponse.json({
       success: true,
-      message: 'Database synced successfully',
-      isCloudKV: isKVConfigured(),
+      message: 'Database synced successfully to Neon PostgreSQL',
+      isCloudKV: true,
     });
   } catch (error) {
     console.error('Sync POST error:', error);

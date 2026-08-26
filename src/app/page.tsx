@@ -1,13 +1,11 @@
 import React from 'react';
-import { db, isKVConfigured, fetchFromKV } from '@/lib/db';
+import { db, fetchFromPostgres } from '@/lib/db';
 import PublicBioView from '@/components/public/PublicBioView';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  if (isKVConfigured()) {
-    await fetchFromKV();
-  }
+  await fetchFromPostgres();
   const publicData = db.getPublicView();
 
   return (
